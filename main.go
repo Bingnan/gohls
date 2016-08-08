@@ -1,25 +1,27 @@
 /*
 
-    This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation, either version 3 of the License, or
-    (at your option) any later version.
+   This program is free software: you can redistribute it and/or modify
+   it under the terms of the GNU General Public License as published by
+   the Free Software Foundation, either version 3 of the License, or
+   (at your option) any later version.
 
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
+   This program is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+   GNU General Public License for more details.
 
-    You should have received a copy of the GNU General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+   You should have received a copy of the GNU General Public License
+   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 */
 
 package main
 
 import "flag"
+import "bytes"
 import "fmt"
 import "io"
+import "io/ioutil"
 import "net/http"
 import "net/url"
 import "log"
@@ -42,7 +44,7 @@ func doRequest(c *http.Client, req *http.Request) (*http.Response, error) {
 }
 
 type Download struct {
-	URI string
+	URI           string
 	totalDuration time.Duration
 }
 
@@ -53,6 +55,17 @@ func downloadSegment(fn string, dlc chan *Download, recTime time.Duration) {
 	}
 	defer out.Close()
 	for v := range dlc {
+
+		fmt.Println("ts v.URI", v.URI)
+		URISlice := strings.Split(v.URI, "/")
+		tsFileName := URISlice[len(URISlice)-1]
+		fmt.Println("tsFileName:", tsFileName)
+		ts_out, err := os.Create(tsFileName)
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer ts_out.Close()
+
 		req, err := http.NewRequest("GET", v.URI, nil)
 		if err != nil {
 			log.Fatal(err)
@@ -62,21 +75,34 @@ func downloadSegment(fn string, dlc chan *Download, recTime time.Duration) {
 			log.Print(err)
 			continue
 		}
+		defer resp.Body.Close()
+
 		if resp.StatusCode != 200 {
 			log.Printf("Received HTTP %v for %v\n", resp.StatusCode, v.URI)
 			continue
 		}
-		_, err = io.Copy(out, resp.Body)
+
+		data, err := ioutil.ReadAll(resp.Body)
 		if err != nil {
 			log.Fatal(err)
 		}
-		resp.Body.Close()
+
+		_, err = io.Copy(ts_out, bytes.NewReader(data))
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		_, err = io.Copy(out, bytes.NewReader(data))
+		if err != nil {
+			log.Fatal(err)
+		}
+
 		log.Printf("Downloaded %v\n", v.URI)
 		if recTime != 0 {
 			log.Printf("Recorded %v of %v\n", v.totalDuration, recTime)
-			} else {
-				log.Printf("Recorded %v\n", v.totalDuration)
-			}
+		} else {
+			log.Printf("Recorded %v\n", v.totalDuration)
+		}
 	}
 }
 
@@ -141,8 +167,8 @@ func getPlaylist(urlStr string, recTime time.Duration, useLocalTime bool, dlc ch
 				}
 			}
 			if mpl.Closed {
-					close(dlc)
-					return
+				close(dlc)
+				return
 			} else {
 				time.Sleep(time.Duration(int64(mpl.TargetDuration * 1000000000)))
 			}
